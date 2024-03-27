@@ -10,7 +10,7 @@ from langchain.schema import AgentAction, AgentFinish, LLMResult
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from .SimpleThrottle import SimpleThrottle
+from SimpleThrottle import SimpleThrottle
 
 
 class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):

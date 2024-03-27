@@ -3,13 +3,12 @@ from langchain import ConversationChain
 from langchain.agents import Agent, Tool, initialize_agent
 from langchain.chains import ConversationChain
 from langchain.chat_models import ChatOpenAI
-from langchain.chat_models.openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import (ChatPromptTemplate, HumanMessagePromptTemplate,
                                MessagesPlaceholder,
                                SystemMessagePromptTemplate)
 from langchain.utilities import GoogleSerperAPIWrapper, SerpAPIWrapper
-from .conversation_utils import is_asking_for_smart_mode, get_recommended_temperature
+from conversation_utils import is_asking_for_smart_mode, get_recommended_temperature
 
 from langchain.callbacks.base import AsyncCallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -19,7 +18,7 @@ from slack_sdk import WebClient
 #https://langchain.readthedocs.io/en/latest/modules/memory/examples/adding_memory_chain_multiple_inputs.html
 # People talking about the parsing error: https://github.com/hwchase17/langchain/issues/1657
 
-from .AsyncStreamingSlackCallbackHandler import AsyncStreamingSlackCallbackHandler
+from AsyncStreamingSlackCallbackHandler import AsyncStreamingSlackCallbackHandler
 
 
 DEFAULT_MODEL="gpt-3.5-turbo"
