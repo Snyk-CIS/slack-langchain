@@ -1,16 +1,14 @@
 import asyncio
-from langchain import ConversationChain
-from langchain.agents import Agent, Tool, initialize_agent
 from langchain.chains import ConversationChain
-from langchain.chat_models import ChatOpenAI
+from langchain.agents import Agent, Tool, initialize_agent
+from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import (ChatPromptTemplate, HumanMessagePromptTemplate,
                                MessagesPlaceholder,
                                SystemMessagePromptTemplate)
-from langchain.utilities import GoogleSerperAPIWrapper, SerpAPIWrapper
+#from langchain.utilities import GoogleSerperAPIWrapper, SerpAPIWrapper
 from conversation_utils import is_asking_for_smart_mode, get_recommended_temperature
-
-from langchain.callbacks.base import AsyncCallbackManager
+from langchain.callbacks.manager import AsyncCallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
 from slack_sdk import WebClient
@@ -78,9 +76,8 @@ class ConversationAI:
                     f"""The following is a Slack chat thread between users and you, a Slack bot named {self.bot_name}.
 You are funny and smart, and you are here to help.
 If you are not confident in your answer, you say so, because you know that is helpful.
-You don't have realtime access to the internet, so if asked for information about a URL or site, you should first acknowledge that your knowledge is limted before responding with what you do know.
+You don't have realtime access to the internet, so if asked for information about a URL or site, you should first acknowledge that your knowledge is limited before responding with what you do know.
 Since you are responding in Slack, you format your messages in Slack markdown, and you LOVE to use Slack emojis to convey emotion.
-If the human appears to be talking to someone else, especially if they start their message with addressing someone else like "@not-the-bot-name", or they am about you in the 3rd person, you will ONLY respond with the emoji: ":speak_no_evil:"
 Some facts about you:
 {model_facts}
 """
@@ -97,7 +94,13 @@ Please try to "tone-match" me: If I use emojis, please use lots of emojis. If I 
         )
         self.callbackHandler = AsyncStreamingSlackCallbackHandler(self.slack_client)
 
-        llm = ChatOpenAI(model_name = self.model_name, temperature=self.model_temperature, request_timeout=60, max_retries=3, streaming=True, verbose=True, callback_manager=AsyncCallbackManager([self.callbackHandler]))
+        llm = ChatOpenAI(model_name = self.model_name,
+                         temperature=self.model_temperature,
+                         request_timeout=60,
+                         max_retries=3,
+                         streaming=True,
+                         verbose=True,
+                         callback_manager=AsyncCallbackManager([self.callbackHandler]))
         # This buffer memory can be set to an arbitrary buffer
         memory = ConversationBufferMemory(return_messages=True)
 
@@ -122,7 +125,10 @@ Please try to "tone-match" me: If I use emojis, please use lots of emojis. If I 
 
         self.memory = memory
         self.agent = ConversationChain(
-            memory=memory, prompt=prompt, llm=llm, verbose=True
+            memory=memory,
+            prompt=prompt,
+            llm=llm,
+            verbose=True
         )
         return self.agent
 

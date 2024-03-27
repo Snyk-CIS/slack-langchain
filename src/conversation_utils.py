@@ -1,12 +1,12 @@
 import os
 from langchain.agents import Tool
 from langchain.memory import ConversationBufferMemory
-from langchain import OpenAI, LLMChain
-from langchain.chat_models import ChatOpenAI
+from langchain.chains import LLMChain
+from langchain_openai import ChatOpenAI
 from langchain.agents import initialize_agent
 from langchain.agents import load_tools
-from langchain.utilities import GoogleSerperAPIWrapper
-from langchain.utilities import SerpAPIWrapper
+from langchain_community.utilities import GoogleSerperAPIWrapper
+from langchain_community.utilities import SerpAPIWrapper
 from langchain.agents import ZeroShotAgent, Tool, AgentExecutor
 from langchain.prompts import PromptTemplate
 
@@ -30,11 +30,6 @@ class Output(BaseModel):
     generations: List[List[Generation]]
     llm_output: LlmOutput
 
-# llm_babbage = OpenAI(temperature=0, model_name="babbage", request_timeout=30, max_retries=2)
-# llm_curie = OpenAI(temperature=0, model_name="curie", request_timeout=30, max_retries=2)
-# llm_davinci = OpenAI(temperature=0, model_name="davinci", request_timeout=30, max_retries=2)
-
-# llm_gpt4 = OpenAI(temperature=0, model_name="gpt4", request_timeout=30, max_retries=2, verbose=True)
 llm_gpt3_turbo = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo", request_timeout=30, max_retries=2, verbose=True)
 
 async def get_simple_response(input:str) -> Output:
