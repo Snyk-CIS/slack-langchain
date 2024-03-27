@@ -30,18 +30,20 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
         self.thread_ts = thread_ts
 
     async def _update_message_in_slack(self):
-        try:
-            await self.client.chat_update(
-                channel=self.channel_id, ts=self.message_ts, text=self.current_message
-            )
-        except SlackApiError as e:
-            print(f"Error updating message: {e}")
+        if self.current_message != "":
+            try:
+                await self.client.chat_update(
+                    channel=self.channel_id,
+                    ts=self.message_ts,
+                    text=self.current_message
+                )
+            except SlackApiError as e:
+                print(f"Error updating message: {e}")
 
     async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
         """Run on new LLM token. Only available when streaming is enabled."""
         self.current_message += token
         await self.update_throttle.call()
-
 
     async def handle_llm_error(self, e: Exception) -> None:
         """Post error message to channel with provided channel_id and thread_ts."""
