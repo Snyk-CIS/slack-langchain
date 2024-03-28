@@ -39,7 +39,9 @@ class ConversationAI:
         print(f"Creating new ConversationAI for {self.bot_name}")
 
         sender_profile = sender_user_info["profile"]
-        # TODO: If we are picking up from where a previous thread left off, we shouldn't be looking at the initial message the same way, and should use the original message as the "initial message"
+        # TODO: If we are picking up from where a previous thread left off
+        # we shouldn't be looking at the initial message the same way, 
+        # and should use the original message as the "initial message"
 
         self.model_name = DEFAULT_MODEL
         self.model_temperature = DEFAULT_TEMPERATURE
@@ -118,7 +120,6 @@ class ConversationAI:
     async def respond(self, sender_user_info, channel_id:str, thread_ts:str, message_being_responded_to_ts:str, message:str):
         async with self.lock:
           agent = await self.get_or_create_agent(sender_user_info, message)
-          # TODO: This is messy and needs to be refactored...
           print("Starting response...")
           await self.callbackHandler.start_new_response(channel_id, thread_ts)
           # Now that we have a handler set up, just telling it to predict is sufficient to get it to start streaming the message response...
