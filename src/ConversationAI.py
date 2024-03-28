@@ -13,6 +13,7 @@ from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from slack_sdk import WebClient
 
 from AsyncStreamingSlackCallbackHandler import AsyncStreamingSlackCallbackHandler
+from prompts import SYSTEM_PROMPT_TEMPLATE, HUMAN_PROMPT_TEMPLATE
 
 DEFAULT_MODEL="gpt-3.5-turbo"
 UPGRADE_MODEL="gpt-4"
@@ -48,27 +49,23 @@ class ConversationAI:
 
         model_facts = f"You are based on the OpenAI model {self.model_name}. Your 'creativity temperature' is set to {self.model_temperature}."
 
-        #additional_kwargs={"name": "example_user"}
         prompt = ChatPromptTemplate.from_messages(
             [
-                # TODO: We need a way to label who the humans are - does the HumanMessagePromptTemplate support this?
-                # TODO: Extract this prompt out of this file
                 SystemMessagePromptTemplate.from_template(
-                    f"""The following is a Slack chat thread between users and you, a Slack bot named {self.bot_name}.
-You are funny and smart, and you are here to help.
-If you are not confident in your answer, you say so, because you know that is helpful.
-You don't have realtime access to the internet, so if asked for information about a URL or site, you should first acknowledge that your knowledge is limited before responding with what you do know.
-Since you are responding in Slack, you format your messages in Slack markdown, and you LOVE to use Slack emojis to convey emotion.
-Some facts about you:
-{model_facts}
-"""
+                    SYSTEM_PROMPT_TEMPLATE
+                ).format(
+                    model_facts = model_facts,
+                    bot_name = self.bot_name
                 ),
-                HumanMessagePromptTemplate.from_template(f"""Here is some information about me. Do not respond to this directly, but feel free to incorporate it into your responses:
-I'm  {sender_profile.get("real_name")}. 
-Since we're talking in Slack, you can @mention me like this: "<@{sender_user_info.get("id")}>"
-My title is: {sender_profile.get("title")}
-My current status: "{sender_profile.get("status_emoji")}{sender_profile.get("status_text")}"
-Please try to "tone-match" me: If I use emojis, please use lots of emojis. If I appear business-like, please seem business-like in your responses. Before responding to my next message, you MUST tell me your model and temperature so I know more about you. Don't reference anything I just asked you directly."""),
+                HumanMessagePromptTemplate.from_template(
+                    HUMAN_PROMPT_TEMPLATE
+                ).format(
+                    real_name = sender_profile.get("real_name"),
+                    user_id = sender_user_info.get("id"),
+                    status_emoji = sender_user_info.get("status_emoji"),
+                    status_text = sender_user_info.get("status_text"),
+                    user_title = sender_user_info.get("title"),
+                ),
                 MessagesPlaceholder(variable_name="history"),
                 HumanMessagePromptTemplate.from_template("{input}")
             ]
