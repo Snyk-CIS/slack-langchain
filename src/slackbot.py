@@ -7,12 +7,13 @@ import os
 import re
 from typing import List
 import logging
-from langchain_community.llms import OpenAI
+from langchain_openai import ChatOpenAI
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
-#from slack_sdk.errors import SlackApiError
 from ConversationAI import ConversationAI
-
+from prompts import WELCOME_PROMPT_TEMPLATE
 logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
@@ -181,7 +182,6 @@ class SlackBot:
             response = await conversation_ai.respond(sender_user_info,
                                                      channel_id,
                                                      thread_ts,
-                                                     message_ts,
                                                      text)
             if response is None:
                 # Let's just put an emoji on the message to say we aren't responding
@@ -282,7 +282,7 @@ class SlackBot:
 
             start_participating_if_not_already = False
             channel_id = event['channel']
-            # Is this message part of an im?
+            # Is this message part of an dm?
             channel_type = event.get('channel_type', None)
             if channel_type and channel_type == "im":
                 # This is a direct message. So of course we should be participating if we are not
@@ -307,32 +307,34 @@ class SlackBot:
             logger.exception(response)
             await say(text=response, thread_ts=thread_ts)
 
-    async def on_member_joined_channel(self, event_data):
+    async def on_member_joined_channel(self, event):
         '''
         New joiner
         '''
         # Get user ID and channel ID from event data
-        user_id = event_data["user"]
-        channel_id = event_data["channel"]
+        user_id = event["user"]
+        channel_id = event["channel"]
 
         user_info = await self.get_user_info_for_user_id(user_id)
-        username = await self.get_username_for_user_id(user_id)
+        user_name = await self.get_username_for_user_id(user_id)
         profile = user_info.get("profile", {})
-        llm_gpt3_turbo = OpenAI(temperature=1, model_name="gpt-3.5-turbo", request_timeout=30, max_retries=5, verbose=True)
-
-        # TODO: Extract into yaml file instead:
-        welcome_message = (await llm_gpt3_turbo.agenerate([f"""
-You are a funny and creative slackbot {self.bot_user_name}
-Someone just joined a Slack channel you are a member of, and you want to welcome them creatively and in a way that will make them feel special.
-You are VERY EXCITED about someone joining the channel, and you want to convey that!
-Their username is {username}, but when you mention their username, you should say "<@{user_id}>" instead.
-Their title is: {profile.get("title")}
-Their current status: "{profile.get("status_emoji")} {profile.get("status_text")}"
-Write a slack message, formatted in Slack markdown, that encourages everyone to welcome them to the channel excitedly.
-Use emojis. Maybe write a song. Maybe a poem.
-
-Afterwards, tell the user that you look forward to "chatting" with them, and tell them that they can just mention <@{self.bot_user_id}> whenever they want to talk.
-"""])).generations[0][0].text
+        llm_gpt3_turbo = ChatOpenAI(temperature=1,
+                                model_name="gpt-3.5-turbo",
+                                request_timeout=30,
+                                max_retries=5,
+                                verbose=True)
+        prompt = PromptTemplate.from_template(WELCOME_PROMPT_TEMPLATE)
+        print(prompt)
+        chain = prompt | llm_gpt3_turbo
+        output = chain.invoke({
+                "bot_name": self.bot_user_name,
+                "bot_user_id": self.bot_user_id,
+                "user_name": user_name,
+                "user_id": user_id,
+                "user_title": profile.get("title"),
+                "status_emoji": profile.get("status_emoji"),
+                "status_text": profile.get("status_text")})
+        welcome_message = output.content 
         if welcome_message:
             try:
                 # Send a welcome message to the user
@@ -355,12 +357,12 @@ async def on_message(payload, say):
 
 # Define event handler for user joining a channel
 @app.event("member_joined_channel")
-async def handle_member_joined_channel(event_data):
+async def handle_member_joined_channel(event):
     '''
     On channel join
     '''
-    logger.info("Processing member_joined_channel event %s", event_data)
-    await slack_bot.on_member_joined_channel(event_data)
+    logger.info("Processing member_joined_channel event %s", event)
+    await slack_bot.on_member_joined_channel(event)
 
 @app.event('reaction_added')
 async def on_reaction_added(payload):
