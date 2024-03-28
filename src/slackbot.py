@@ -12,7 +12,7 @@ import os
 import re
 from typing import List
 
-from langchain_community.llms.OpenAI import OpenAI
+from langchain_community.llms import OpenAI
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 from slack_sdk.errors import SlackApiError
@@ -23,7 +23,6 @@ OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_APP_TOKEN = os.environ.get('SLACK_APP_TOKEN')
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
-
 
 class SlackBot:
     def __init__(self, slack_app: AsyncApp):
@@ -122,7 +121,6 @@ class SlackBot:
             await self.client.reactions_add(channel=channel, name="speak_no_evil", timestamp=message_ts)
         except Exception as e:
             logger.exception(e)
-
 
     async def respond_to_message(self, channel_id, thread_ts, message_ts, user_id, text):
         try:
@@ -292,30 +290,3 @@ async def on_reaction_removed(payload):
 @app.event('app_mention')
 async def on_app_mention(payload, say):
     logger.info("Ignoring app_mention in favor of handling it via the message handler...")
-
-# This will take too long - maybe at some point we can do this and save it off somewhere
-async def getCommonCustomEmojis(num_to_retrieve: int = 40):
-    # Call the emoji.list API method to retrieve the list of custom emojis
-    try:
-        response = await client.emoji_list()
-        emoji_list = response["emoji"]
-    except SlackApiError as e:
-        print("Error retrieving custom emojis: {}".format(e))
-
-    # Retrieve the usage count for each custom emoji
-    emoji_counts = []
-    for emoji in emoji_list:
-        try:
-            response = await client.emoji_get(name=emoji)
-            count = response["emoji"]["usage_count"]
-            emoji_counts.append((emoji, count))
-        except SlackApiError as e:
-            print("Error retrieving usage count for emoji {}: {}".format(emoji, e))
-
-    # Sort the list of custom emojis by usage count in descending order
-    emoji_counts.sort(key=lambda x: x[1], reverse=True)
-
-    # Retrieve the num_to_retrieve most commonly used custom emojis
-    most_common_emojis = [emoji for emoji, count in emoji_counts[:num_to_retrieve]]
-
-    return most_common_emojis

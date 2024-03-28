@@ -3,29 +3,28 @@ from langchain.chains import ConversationChain
 from langchain.agents import Agent, Tool, initialize_agent
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
-from langchain.prompts import (ChatPromptTemplate, HumanMessagePromptTemplate,
+from langchain.prompts import (ChatPromptTemplate,
+                               HumanMessagePromptTemplate,
                                MessagesPlaceholder,
                                SystemMessagePromptTemplate)
-#from langchain.utilities import GoogleSerperAPIWrapper, SerpAPIWrapper
-from conversation_utils import is_asking_for_smart_mode, get_recommended_temperature
 from langchain.callbacks.manager import AsyncCallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
 from slack_sdk import WebClient
-# How to do a search over docs with conversation:
-#https://langchain.readthedocs.io/en/latest/modules/memory/examples/adding_memory_chain_multiple_inputs.html
-# People talking about the parsing error: https://github.com/hwchase17/langchain/issues/1657
 
 from AsyncStreamingSlackCallbackHandler import AsyncStreamingSlackCallbackHandler
 
-
 DEFAULT_MODEL="gpt-3.5-turbo"
 UPGRADE_MODEL="gpt-4"
-DEFAULT_TEMPERATURE=0.3
+DEFAULT_TEMPERATURE=0.0
 
 class ConversationAI:
     def __init__(
-        self, bot_name:str, slack_client:WebClient, existing_thread_history=None, model_name:str=None
+        self,
+        bot_name:str,
+        slack_client:WebClient,
+        existing_thread_history=None,
+        model_name:str=None
     ):
         self.bot_name = bot_name
         self.existing_thread_history = existing_thread_history
@@ -39,29 +38,11 @@ class ConversationAI:
         print(f"Creating new ConversationAI for {self.bot_name}")
 
         sender_profile = sender_user_info["profile"]
-
         # TODO: If we are picking up from where a previous thread left off, we shouldn't be looking at the initial message the same way, and should use the original message as the "initial message"
 
-        # Call both async methods simultaneously
-        smart_mode_task = asyncio.create_task(is_asking_for_smart_mode(initial_message))
-        recommended_temperature_task = asyncio.create_task(get_recommended_temperature(initial_message, DEFAULT_TEMPERATURE))
+        self.model_name = DEFAULT_MODEL
+        self.model_temperature = DEFAULT_TEMPERATURE
 
-        # Await the results
-        requested_smart_mode, recommended_temperature = await asyncio.gather(smart_mode_task, recommended_temperature_task)
-
-        if requested_smart_mode:
-            self.model_name = UPGRADE_MODEL
-        else:
-            self.model_name = DEFAULT_MODEL
-
-        if recommended_temperature is not None:
-            recommended_temperature = max(0.0, recommended_temperature)
-            recommended_temperature = min(1.0, recommended_temperature)
-        else:
-            recommended_temperature = DEFAULT_TEMPERATURE
-
-        self.model_temperature = recommended_temperature
-        
         print("Will use model: " + self.model_name)
         print(f"Will use temperature: {self.model_temperature}")
 
@@ -146,39 +127,3 @@ Please try to "tone-match" me: If I use emojis, please use lots of emojis. If I 
           # Now that we have a handler set up, just telling it to predict is sufficient to get it to start streaming the message response...
           response = await self.agent.apredict(input=message)
           return response
-        
-def get_conversational_agent(model_name="gpt-3.5-turbo"):
-  search = GoogleSerperAPIWrapper()
-  # TODO: File a PR to fix this return_messages=True thing
-  memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-  search = SerpAPIWrapper()
-  tools = [
-      Tool(
-          name = "search",
-          func=search.run,
-          description="(ONLY if your confidence in your answer is below 0.2, use this tool to search for information)"
-      ),
-  ]
-  llm=ChatOpenAI(temperature=0, model=model_name, verbose=True, request_timeout=30, max_retries=0)
-  agent_chain = initialize_agent(tools, llm, agent="chat-conversational-react-description", verbose=True, memory=memory, request_timeout=30)
-  return agent_chain
-
-
-
-
-# class CustomConversationAgent(Agent):
-#     def __init__(self, llm_chain, allowed_tools=None):
-#         super().__init__(llm_chain, allowed_tools)
-
-#     def parse_output(self, output):
-#         lines = output.strip().split("\n")
-#         is_talking_to_ai = "no"
-#         switch_to_smarter_mode = "no"
-
-#         for line in lines:
-#             if line.startswith("Is_talking_to_AI:"):
-#                 is_talking_to_ai = line.split(":")[1].strip()
-#             elif line.startswith("Switch_to_smarter_mode:"):
-#                 switch_to_smarter_mode = line.split(":")[1].strip()
-
-#         return is_talking_to_ai, switch_to_smarter_mode
