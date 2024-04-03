@@ -2,6 +2,9 @@
 AI Class
 '''
 import asyncio
+import os
+from typing import List
+from operator import itemgetter
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationChain
@@ -10,14 +13,56 @@ from langchain.prompts import (ChatPromptTemplate,
                                MessagesPlaceholder,
                                SystemMessagePromptTemplate)
 from langchain.callbacks.manager import AsyncCallbackManager
-
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.embeddings import Embeddings
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.pydantic_v1 import BaseModel
+from langchain_core.runnables import (
+    Runnable,
+    RunnableLambda,
+    RunnablePassthrough,
+    RunnableSequence,
+    chain,
+)
+from langchain_core.output_parsers import StrOutputParser
+from langchain_community.vectorstores.pgvector import PGVector
+from langchain_community.embeddings import GPT4AllEmbeddings
 from slack_sdk import WebClient
 
 from AsyncStreamingSlackCallbackHandler import AsyncStreamingSlackCallbackHandler
-from prompts import SYSTEM_PROMPT_TEMPLATE, HUMAN_PROMPT_TEMPLATE
+from prompts import (SYSTEM_PROMPT_SNYK,
+                     HUMAN_PROMPT_TEMPLATE,
+                     SYSTEM_PROMPT_SNYK)
 
 DEFAULT_MODEL="gpt-3.5-turbo"
 DEFAULT_TEMPERATURE=0.0
+
+def format_docs(docs: List):
+    '''
+    Format the docs
+    '''
+    return "\n\n".join([d.page_content for d in docs])
+
+def get_retriever() -> BaseRetriever:
+    '''
+    Init the vectorstore and retrieve
+    '''
+    vectorstore = PGVector(
+        collection_name='dealdesk-test',
+        connection_string=os.environ.get('DATABASE_URL'),
+        embedding_function=get_embeddings(),
+    )
+    return vectorstore.as_retriever(
+                search_kwargs={'k': 10}
+            )
+
+
+def get_embeddings() -> Embeddings:
+    '''
+    Init the embeddings
+    '''
+    embeddings = GPT4AllEmbeddings()
+    return embeddings
 
 class ConversationAI:
     '''
@@ -51,17 +96,14 @@ class ConversationAI:
         print(f"Will use model: {DEFAULT_MODEL}")
         print(f"Will use temperature: {DEFAULT_TEMPERATURE}")
 
-        model_facts = f"You are based on the OpenAI model {DEFAULT_MODEL}.\
-                Your 'creativity temperature' is set to {DEFAULT_TEMPERATURE}."
-
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessagePromptTemplate.from_template(
-                    SYSTEM_PROMPT_TEMPLATE
-                ).format(
-                    model_facts = model_facts,
-                    bot_name = self.bot_name
+                    SYSTEM_PROMPT_SNYK
                 ),
+                #.format(
+                #    bot_name = self.bot_name
+                #),
                 HumanMessagePromptTemplate.from_template(
                     HUMAN_PROMPT_TEMPLATE
                 ).format(
@@ -110,12 +152,23 @@ class ConversationAI:
                     memory.chat_memory.add_user_message(message_content)
 
         self.memory = memory
-        self.agent = ConversationChain(
-            memory=memory,
-            prompt=prompt,
-            llm=llm,
-            verbose=True
+
+        # prompt step expects a map with three variables
+        self.agent = (
+            {"context": get_retriever() | format_docs,
+             "input": RunnablePassthrough(),
+             "history": RunnableLambda(self.memory.load_memory_variables) | itemgetter("history")}
+        | prompt
+        | llm
+        | StrOutputParser()
         )
+
+        #self.agent = ConversationChain(
+        #    memory=memory,
+        #    prompt=prompt,
+        #    llm=llm,
+        #    verbose=True
+        #)
         return self.agent
 
     async def get_or_create_agent(self, sender_user_info):
@@ -138,7 +191,7 @@ class ConversationAI:
             await self.get_or_create_agent(sender_user_info)
             print("Starting response...")
             await self.callback_handler.start_new_response(channel_id, thread_ts)
-            # Now that we have a handler set up, just telling it to predict
-            # is sufficient to get it to start streaming the message response...
-            response = await self.agent.apredict(input=message)
+            response = await self.agent.ainvoke(input=message)
+            self.memory.chat_memory.add_user_message(message)
+            self.memory.chat_memory.add_ai_message(response)
             return response
