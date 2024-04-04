@@ -334,7 +334,7 @@ class SlackBot:
                 "user_title": profile.get("title"),
                 "status_emoji": profile.get("status_emoji"),
                 "status_text": profile.get("status_text")})
-        welcome_message = output.content 
+        welcome_message = output.content
         if welcome_message:
             try:
                 # Send a welcome message to the user

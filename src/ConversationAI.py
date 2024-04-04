@@ -1,28 +1,30 @@
 '''
 AI Class
 '''
+# TODO
+# Configuration from envvars
+# Work out how to do prompts
 import asyncio
 import os
 from typing import List
 from operator import itemgetter
 from langchain_openai import ChatOpenAI
+from langchain.globals import set_debug
 from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationChain
-from langchain.prompts import (ChatPromptTemplate,
+from langchain.prompts import (PromptTemplate,
+                               ChatPromptTemplate,
                                HumanMessagePromptTemplate,
                                MessagesPlaceholder,
                                SystemMessagePromptTemplate)
 from langchain.callbacks.manager import AsyncCallbackManager
 from langchain_core.retrievers import BaseRetriever
+from langchain_core.language_models import LanguageModelLike
 from langchain_core.embeddings import Embeddings
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.pydantic_v1 import BaseModel
 from langchain_core.runnables import (
     Runnable,
+    RunnableBranch,
     RunnableLambda,
     RunnablePassthrough,
-    RunnableSequence,
-    chain,
 )
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.vectorstores.pgvector import PGVector
@@ -32,10 +34,13 @@ from slack_sdk import WebClient
 from AsyncStreamingSlackCallbackHandler import AsyncStreamingSlackCallbackHandler
 from prompts import (SYSTEM_PROMPT_SNYK,
                      HUMAN_PROMPT_TEMPLATE,
-                     SYSTEM_PROMPT_SNYK)
+                     REPHRASE_TEMPLATE)
+
+set_debug(False)
 
 DEFAULT_MODEL="gpt-3.5-turbo"
 DEFAULT_TEMPERATURE=0.0
+ENABLE_REPHRASE=True
 
 def format_docs(docs: List):
     '''
@@ -56,6 +61,17 @@ def get_retriever() -> BaseRetriever:
                 search_kwargs={'k': 10}
             )
 
+def get_rephrase_llm() -> LanguageModelLike:
+    '''
+    Configure the LLM
+    '''
+    llm = ChatOpenAI(model_name = DEFAULT_MODEL,
+                     temperature = DEFAULT_TEMPERATURE,
+                     request_timeout = 60,
+                     max_retries = 3,
+                     streaming = True,
+                     verbose = True)
+    return llm
 
 def get_embeddings() -> Embeddings:
     '''
@@ -63,6 +79,45 @@ def get_embeddings() -> Embeddings:
     '''
     embeddings = GPT4AllEmbeddings()
     return embeddings
+
+def create_rephrase_chain() -> Runnable:
+    '''
+    Create the rephrase chain
+    '''
+    if ENABLE_REPHRASE:
+        rephrase_question_prompt = PromptTemplate.from_template(REPHRASE_TEMPLATE)
+        rephrase_question_chain = (
+            rephrase_question_prompt | get_rephrase_llm() | StrOutputParser()
+        ).with_config(
+            run_name="RephraseQuestion",
+        )
+        return RunnableBranch(
+              (
+                  RunnableLambda(lambda x: bool(x.get("history"))).with_config(
+                      run_name="HasChatHistoryCheck"
+                  ),
+                  RunnablePassthrough.assign(
+                      input=rephrase_question_chain.with_config(
+                          run_name="RephraseQuestionWithHistory"))
+              ),
+              (
+                  RunnablePassthrough()
+                  .with_config(run_name="RephraseQuestionNoHistory")
+                  )
+          ).with_config(run_name="RouteDependingOnChatHistory")
+    return RunnablePassthrough().with_config(run_name="RephraseQuestionDisabled")
+
+def create_retriever_chain(
+        retriever: BaseRetriever,
+        ) -> Runnable:
+    '''
+    Create the retriever chain
+    '''
+    return (
+            RunnableLambda(itemgetter("input")).with_config(
+                run_name="Itemgetter:input"
+            )
+            | retriever).with_config(run_name="RetrievalChain")
 
 class ConversationAI:
     '''
@@ -89,9 +144,6 @@ class ConversationAI:
         print(f"Creating new ConversationAI for {self.bot_name}")
 
         sender_profile = sender_user_info["profile"]
-        # TODO: If we are picking up from where a previous thread left off
-        # we shouldn't be looking at the initial message the same way,
-        # and should use the original message as the "initial message"
 
         print(f"Will use model: {DEFAULT_MODEL}")
         print(f"Will use temperature: {DEFAULT_TEMPERATURE}")
@@ -153,22 +205,28 @@ class ConversationAI:
 
         self.memory = memory
 
-        # prompt step expects a map with three variables
+        retriever_chain = create_retriever_chain(
+                get_retriever())
+
+        history = (
+                RunnablePassthrough.assign(
+                history=RunnableLambda(memory.load_memory_variables) | itemgetter("history"))
+                .with_config(run_name="AddHistory")
+        )
+        context = (
+                RunnablePassthrough.assign(docs=retriever_chain)
+                .assign(context=lambda x: format_docs(x["docs"]))
+                .with_config(run_name="RetrieveDocs")
+        )
+
         self.agent = (
-            {"context": get_retriever() | format_docs,
-             "input": RunnablePassthrough(),
-             "history": RunnableLambda(self.memory.load_memory_variables) | itemgetter("history")}
+        history
+        | create_rephrase_chain()
+        | context
         | prompt
         | llm
         | StrOutputParser()
         )
-
-        #self.agent = ConversationChain(
-        #    memory=memory,
-        #    prompt=prompt,
-        #    llm=llm,
-        #    verbose=True
-        #)
         return self.agent
 
     async def get_or_create_agent(self, sender_user_info):
@@ -191,7 +249,7 @@ class ConversationAI:
             await self.get_or_create_agent(sender_user_info)
             print("Starting response...")
             await self.callback_handler.start_new_response(channel_id, thread_ts)
-            response = await self.agent.ainvoke(input=message)
+            response = await self.agent.ainvoke({"input": message})
             self.memory.chat_memory.add_user_message(message)
             self.memory.chat_memory.add_ai_message(response)
             return response

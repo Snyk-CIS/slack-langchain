@@ -63,11 +63,12 @@ user.\
 """
 REPHRASE_TEMPLATE = """\
 Given the following conversation and a follow up question, rephrase the follow up \
-question to be a standalone question.
+question to be a standalone question. If the follow up question does not need context, return the exact same text back.
+    Never rephrase the follow up question given the chat history unless the follow up question needs context.
 
 Chat History:
-{chat_history}
-Follow Up Input: {question}
+{history}
+Follow Up Input: {input}
 Standalone Question:"""
 
 SYSTEM_PROMPT_SNYK="""
