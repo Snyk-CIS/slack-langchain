@@ -1,7 +1,13 @@
+'''
+Simple throttle
+'''
 import time
 import asyncio
 
 class SimpleThrottle:
+    '''
+    Simple throttle
+    '''
     def __init__(self, coro, delay):
         self.coro = coro
         self.delay = delay
@@ -26,13 +32,18 @@ class SimpleThrottle:
             await self.call()
 
     async def call(self):
+        '''
+        call
+        '''
         if self.update_task is None:
             self.update_task = asyncio.ensure_future(self._wrapper())
         else:
             self.queue_count = min(self.queue_count + 1, 1)
 
     async def call_and_wait(self):
+        '''
+        call and wait
+        '''
         if self.update_task is not None:
             await self.update_task
         await self.coro()
-

@@ -1,29 +1,38 @@
+# pragma pylint: disable=broad-exception-caught,broad-exception-raised
+'''
+Callback handler for Slack
+'''
 import logging
 from typing import Any, Dict, List, Union
-
-logger = logging.getLogger(__name__)
-
-from typing import Any, Dict, List, Union
-
-from langchain.callbacks.base import AsyncCallbackHandler, BaseCallbackHandler
+from langchain.callbacks.base import AsyncCallbackHandler
 from langchain.schema import AgentAction, AgentFinish, LLMResult
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from SimpleThrottle import SimpleThrottle
+from simple_throttle import SimpleThrottle
 
+logger = logging.getLogger(__name__)
 
+# pylint: disable=abstract-method,too-many-ancestors
 class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
-    """Async callback handler for streaming to Slack. Only works with LLMs that support streaming."""
+    """
+    Async callback handler for streaming to Slack.
+    Only works with LLMs that support streaming.
+    """
 
     def __init__(self, client: WebClient):
         self.client = client
         self.channel_id = None
         self.thread_ts = None
+        self.message_ts = None
         self.update_delay = 0.1  # Set the desired delay in seconds
         self.update_throttle = SimpleThrottle(self._update_message_in_slack, self.update_delay)
+        self.current_message = ""
 
     async def start_new_response(self, channel_id, thread_ts):
+        '''
+        Start new response
+        '''
         self.current_message = ""
         self.message_ts = None
         self.channel_id = channel_id
@@ -48,10 +57,13 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
     async def handle_llm_error(self, e: Exception) -> None:
         """Post error message to channel with provided channel_id and thread_ts."""
         try:
-            logger.error(f"Got LLM Error. Will post about it: {e}")
-            await self.client.chat_postMessage(text=str(e), channel=self.channel_id, thread_ts=self.thread_ts)
-        except Exception as e:
-            logger.error(f"Error posting exception message: {e}")
+            logger.error("Got LLM Error. Will post about it: %s", e)
+            await self.client.chat_postMessage(
+                    text=str(e),
+                    channel=self.channel_id,
+                    thread_ts=self.thread_ts)
+        except Exception:
+            logger.error("Error posting exception message: %s", e)
 
     async def on_llm_start(
         self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any
@@ -60,7 +72,10 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
             if self.channel_id is None:
                 raise Exception("channel_id is None")
             # Send an empty response and get the timestamp
-            post_response = await self.client.chat_postMessage(text="...", channel=self.channel_id, thread_ts=self.thread_ts)
+            post_response = await self.client.chat_postMessage(
+                    text="...",
+                    channel=self.channel_id,
+                    thread_ts=self.thread_ts)
             self.message_ts: str = post_response["ts"]
         except Exception as e:
             await self.handle_llm_error(e)
@@ -100,7 +115,6 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
 
     async def on_agent_action(self, action: AgentAction, **kwargs: Any) -> Any:
         """Run on agent action."""
-        pass
 
     async def on_tool_end(self, output: str, **kwargs: Any) -> None:
         """Run when tool ends running."""
