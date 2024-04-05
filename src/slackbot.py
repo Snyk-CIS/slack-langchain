@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
+# pragma pylint: disable=broad-exception-caught,broad-exception-raised
 '''
 Slackbot
 '''
-
 import os
 import re
 from typing import List
 import logging
-from langchain_openai import ChatOpenAI
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
-from ConversationAI import ConversationAI
-from prompts import WELCOME_PROMPT_TEMPLATE
+from conversation_ai import ConversationAI, create_welcome_message
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_APP_TOKEN = os.environ.get('SLACK_APP_TOKEN')
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
 
-class SlackBot:
+class SlackBot():
     '''
     Slackbot class
     '''
@@ -103,7 +98,8 @@ class SlackBot:
                     thread_ts=thread_ts
                     )
             file_id: str = file_response["file"]["id"]
-            response += "\n"+f"<https://slack.com/files/{self.bot_user_id}/{file_id}|code.{extension}>"
+            response += "\n"+f"<https://slack.com/files/\
+                    {self.bot_user_id}/{file_id}|code.{extension}>"
             counter += 1
         return response
 
@@ -168,6 +164,7 @@ class SlackBot:
                                  message_ts,
                                  user_id,
                                  text):
+        # pylint: disable=too-many-arguments
         '''
         Respond to message
         '''
@@ -311,37 +308,26 @@ class SlackBot:
         '''
         New joiner
         '''
-        # Get user ID and channel ID from event data
-        user_id = event["user"]
-        channel_id = event["channel"]
+        if os.environ.get("WELCOME_MESSAGE"):
+            # Get user ID and channel ID from event data
+            user_id = event["user"]
+            channel_id = event["channel"]
 
-        user_info = await self.get_user_info_for_user_id(user_id)
-        user_name = await self.get_username_for_user_id(user_id)
-        profile = user_info.get("profile", {})
-        llm_gpt3_turbo = ChatOpenAI(temperature=1,
-                                model_name="gpt-3.5-turbo",
-                                request_timeout=30,
-                                max_retries=5,
-                                verbose=True)
-        prompt = PromptTemplate.from_template(WELCOME_PROMPT_TEMPLATE)
-        print(prompt)
-        chain = prompt | llm_gpt3_turbo
-        output = chain.invoke({
-                "bot_name": self.bot_user_name,
-                "bot_user_id": self.bot_user_id,
-                "user_name": user_name,
-                "user_id": user_id,
-                "user_title": profile.get("title"),
-                "status_emoji": profile.get("status_emoji"),
-                "status_text": profile.get("status_text")})
-        welcome_message = output.content
-        if welcome_message:
-            try:
-                # Send a welcome message to the user
-                await self.client.chat_postMessage(channel=channel_id, text=welcome_message)
-            except Exception as e:
-                logger.exception("Error sending welcome message: %s", e)
-
+            user_info = await self.get_user_info_for_user_id(user_id)
+            user_name = await self.get_username_for_user_id(user_id)
+            profile = user_info.get("profile", {})
+            welcome_message = create_welcome_message(
+                    self.bot_user_name,
+                    self.bot_user_id,
+                    user_name,
+                    user_id,
+                    profile)
+            if welcome_message:
+                try:
+                    # Send a welcome message to the user
+                    await self.client.chat_postMessage(channel=channel_id, text=welcome_message)
+                except Exception as e:
+                    logger.exception("Error sending welcome message: %s", e)
 
 app = AsyncApp(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
 client = app.client
