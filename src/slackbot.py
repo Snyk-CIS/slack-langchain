@@ -171,11 +171,7 @@ class SlackBot():
         Respond to message
         '''
         try:
-            conversation_ai: ConversationAI = self.threads_bot_is_participating_in.get(
-                    thread_ts,
-                    None)
-            if conversation_ai is None:
-                raise Exception("No AI found for thread_ts")
+            conversation_ai = self.get_ai_for_thread(thread_ts)
             text = await self.translate_mentions_to_names(text)
             sender_user_info = await self.get_user_info_for_user_id(user_id)
             response = await conversation_ai.respond(sender_user_info,
@@ -339,12 +335,21 @@ class SlackBot():
             message = await self.client.conversations_replies(
                     channel=channel_id,
                     ts=message_ts,
-                    #limit=1,
-                    #inclusive=True,
                 )
         except SlackApiError as e:
             print(f"Error updating message: {e}")
         return message
+
+    def get_ai_for_thread(self, thread_ts):
+        '''
+        Get the AI for a thread
+        '''
+        conversation_ai: ConversationAI = self.threads_bot_is_participating_in.get(
+                thread_ts,
+                None)
+        if conversation_ai is None:
+            raise Exception("No AI found for thread_ts")
+        return conversation_ai
 
 app = AsyncApp(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
 client = app.client
@@ -375,16 +380,21 @@ async def on_reaction_added(payload):
     '''
     logger.info("reaction_added %s", payload)
     if payload['item_user'] == slack_bot.bot_user_id:
-        print("AI message")
+        # Get the message
         message = await slack_bot.get_message(
                 payload['item']['channel'], payload['item']['ts'])
-        print(message)
-    else:
-        print("Not the AI")
-    # If the reaction is on one of our messages
-    # Check if the message is in the run_ids dict
-    # If it is post feedback
-    # If it isn't then probably we've ended the session on an older thread
+        if message:
+            # Get the ai for the thread
+            ai = slack_bot.get_ai_for_thread(message['messages'][0]['thread_ts'])
+            if ai:
+                # Lookup the run id
+                if payload['item']['ts'] in ai.run_ids:
+                    logger.info("Got run id %s in run_ids map", ai.run_ids[payload['item']['ts']])
+                    # post feedback here
+                else:
+                    logger.info("Couldn't find %s in run_id map", payload['item']['ts'])
+        else:
+            logger.info("Could not get message from reaction event")
 
 @app.event('reaction_removed')
 async def on_reaction_removed(payload):
