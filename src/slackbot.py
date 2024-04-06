@@ -7,8 +7,10 @@ import os
 import re
 from typing import List
 import logging
+from slack_sdk.errors import SlackApiError
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
+from langsmith import Client
 from conversation_ai import ConversationAI, create_welcome_message
 logger = logging.getLogger(__name__)
 
@@ -329,9 +331,25 @@ class SlackBot():
                 except Exception as e:
                     logger.exception("Error sending welcome message: %s", e)
 
+    async def get_message(self, channel_id, message_ts):
+        '''
+        Get a message
+        '''
+        try:
+            message = await self.client.conversations_replies(
+                    channel=channel_id,
+                    ts=message_ts,
+                    #limit=1,
+                    #inclusive=True,
+                )
+        except SlackApiError as e:
+            print(f"Error updating message: {e}")
+        return message
+
 app = AsyncApp(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
 client = app.client
 slack_bot = SlackBot(app)
+langsmith_client = Client()
 
 @app.event("message")
 async def on_message(payload, say):
@@ -355,7 +373,18 @@ async def on_reaction_added(payload):
     '''
     On reaction added
     '''
-    logger.info("Ignoring reaction_added %s", payload)
+    logger.info("reaction_added %s", payload)
+    if payload['item_user'] == slack_bot.bot_user_id:
+        print("AI message")
+        message = await slack_bot.get_message(
+                payload['item']['channel'], payload['item']['ts'])
+        print(message)
+    else:
+        print("Not the AI")
+    # If the reaction is on one of our messages
+    # Check if the message is in the run_ids dict
+    # If it is post feedback
+    # If it isn't then probably we've ended the session on an older thread
 
 @app.event('reaction_removed')
 async def on_reaction_removed(payload):
