@@ -1,3 +1,4 @@
+# pragma pylint: disable=too-few-public-methods
 '''
 Base classes for config
 '''
@@ -12,21 +13,86 @@ def iterset_envvars(obj,
     for evar in envvars:
         if evar not in os.environ and not set_optional:
             raise ValueError(f'Required environment variable {evar} was not set')
-        setattr(obj, evar.lower(), os.environ.get(evar))
+        if evar in os.environ:
+            setattr(obj, evar.lower(), os.environ.get(evar))
+
+class Config():
+    '''
+    Generic config class
+    '''
+    def __init__(self):
+        self.slack = self.SlackConfig()
+        self.enable_rephrase = True
+        self.langchain_debug = False
+        self.welcome_message = False
+
+        self._set_defaults()
+        self._configure_welcome()
+
+    def _configure_welcome(self):
+        '''
+        Configure welome message
+        '''
+        if self.welcome_message:
+            iterset_envvars(self, ['WELCOME_PROMPT'])
+
+    def _set_defaults(self):
+        '''
+        Set defaults
+        '''
+        optional_config = [
+            'ENABLE_REPHRASE',
+            'LANGCHAIN_DEBUG',
+            'WELCOME_MESSAGE',
+        ]
+        iterset_envvars(self,
+                        optional_config,
+                        set_optional=True)
+
+    class SlackConfig():
+        '''
+        Slack config
+        '''
+        def __init__(self):
+            self.slack_debug = False
+            self.slack_bot_token = None
+            self.slack_app_token = None
+            self.slack_signing_secret = None
+            self.enable_feedback = True
+
+            self._set_defaults()
+
+        def _set_defaults(self):
+            '''
+            Set defaults
+            '''
+            base_config = [
+                    'SLACK_BOT_TOKEN',
+                    'SLACK_APP_TOKEN',
+                    'SLACK_SIGNING_SECRET'
+            ]
+            optional_config = [
+                    'SLACK_DEBUG',
+                    'ENABLE_FEEDBACK'
+            ]
+            iterset_envvars(self,
+                            base_config)
+            iterset_envvars(self,
+                            optional_config,
+                            set_optional=True)
 
 class Chatapp():
     '''
     Chatapp class
     '''
-    def __init__(self):
+    def __init__(self, config):
 
         self.vector = self.Vector()
-        self.config = self.Config()
+        self.config = config
         self.model_type = None
         self.temperature = None
         self.system_prompt = None
-
-        self.check_envvars()
+        self._check_envvars()
 
         if self.vector.embed_type == 'openai' and not self.model_type == 'openai':
             self.openai = self.OpenAI()
@@ -34,7 +100,7 @@ class Chatapp():
             print("Found openai")
             self.openai = self.OpenAI(llm=True)
 
-    def check_envvars(self):
+    def _check_envvars(self):
         '''
         Check for required envvars
         '''
@@ -42,20 +108,8 @@ class Chatapp():
                 'MODEL_TYPE',
                 'TEMPERATURE',
                 'SYSTEM_PROMPT']
-        self.iterset_envvars(base_config)
+        iterset_envvars(self, base_config)
 
-    def iterset_envvars(self,
-                        envvars,
-                        set_optional=False):
-        '''
-        Iterate a list of envvars
-        '''
-        for evar in envvars:
-            if evar not in os.environ and not set_optional:
-                raise ValueError(f'Required environment variable {evar} was not set')
-            setattr(self, evar.lower(), os.environ.get(evar))
-
-    # pylint: disable='too-few-public-methods'
     class OpenAI():
         '''
         OpenAI class
@@ -78,10 +132,10 @@ class Chatapp():
             self.database_url = None
             self.vector_type = None
 
-            self.set_vector_vars()
-            self.heroku_fixup()
+            self._set_vector_vars()
+            self._heroku_fixup()
 
-        def set_vector_vars(self):
+        def _set_vector_vars(self):
             '''
             Set vector related vars
             '''
@@ -97,45 +151,9 @@ class Chatapp():
             if self.vector_type == 'pgvector':
                 iterset_envvars(self, ['DATABASE_URL'])
 
-        def heroku_fixup(self):
+        def _heroku_fixup(self):
             '''
             Heroku fix up
             '''
             if self.database_url.startswith('postgres://'):
                 self.database_url = self.database_url.replace('postgres://', 'postgresql://')
-
-    class Config():
-        '''
-        Generic config class
-        '''
-        def __init__(self):
-            self.enable_rephrase = True
-            self.langchain_debug = False
-            self.slack_debug = False
-            self.welcome_message = False
-
-            self.set_defaults()
-            self.configure_welcome()
-
-        def configure_welcome(self):
-            '''
-            Configure welome message
-            '''
-            if self.welcome_message:
-                iterset_envvars(self, ['WELCOME_PROMPT'])
-            else:
-                os.environ['WELCOME_MESSAGE'] = False
-
-        def set_defaults(self):
-            '''
-            Set defaults
-            '''
-            optional_config = [
-                'ENABLE_REPHRASE',
-                'LANGCHAIN_DEBUG',
-                'SLACK_DEBUG',
-                'WELCOME_MESSAGE'
-                ]
-            iterset_envvars(self,
-                            optional_config,
-                            set_optional=True)

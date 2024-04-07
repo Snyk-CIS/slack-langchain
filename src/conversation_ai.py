@@ -40,7 +40,7 @@ from slack_sdk import WebClient
 from callback_handler import AsyncStreamingSlackCallbackHandler
 from prompts import (HUMAN_PROMPT_TEMPLATE,
                      REPHRASE_TEMPLATE)
-from chatapp import Chatapp
+from chatapp import Chatapp, Config
 
 def format_docs(docs: List):
     '''
@@ -133,7 +133,7 @@ class ConversationAI(Chatapp):
         self.lock = asyncio.Lock()
         self.run_ids = {}
 
-        super().__init__()
+        super().__init__(Config())
 
         set_debug(self.config.langchain_debug)
 
