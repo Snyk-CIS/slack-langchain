@@ -340,6 +340,26 @@ class SlackBot():
             print(f"Error updating message: {e}")
         return message
 
+    async def post_feedback(self,
+                      ls_client,
+                      slack_user,
+                      run_id,
+                      score):
+        '''
+        Post feedback score to langsmith
+        '''
+        try:
+            feedback = ls_client.create_feedback(
+                    run_id,
+                    score =score,
+                    comment = slack_user,
+                    key ='Slack'
+                    )
+        except Exception as e:
+            logger.exception("Error sending feedback: %s", e)
+        return feedback.id
+
+
     def get_ai_for_thread(self, thread_ts):
         '''
         Get the AI for a thread
@@ -350,6 +370,18 @@ class SlackBot():
         if conversation_ai is None:
             raise Exception("No AI found for thread_ts")
         return conversation_ai
+
+    def get_feedback_score(self, emoji):
+        '''
+        Feedback emoji
+        '''
+        score_mappings = {
+                "+1": 1,
+                "-1": -1
+        }
+        score = score_mappings.get(emoji,False)
+        print(f"Score is {score}")
+        return score
 
 app = AsyncApp(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
 client = app.client
@@ -379,8 +411,10 @@ async def on_reaction_added(payload):
     On reaction added
     '''
     logger.info("reaction_added %s", payload)
-    if payload['item_user'] == slack_bot.bot_user_id:
+    if payload['item_user'] == slack_bot.bot_user_id and (
+            score := slack_bot.get_feedback_score(payload['reaction'])):
         # Get the message
+        print("Got score and user")
         message = await slack_bot.get_message(
                 payload['item']['channel'], payload['item']['ts'])
         if message:
@@ -390,7 +424,16 @@ async def on_reaction_added(payload):
                 # Lookup the run id
                 if payload['item']['ts'] in ai.run_ids:
                     logger.info("Got run id %s in run_ids map", ai.run_ids[payload['item']['ts']])
-                    # post feedback here
+                    user_name = await slack_bot.get_username_for_user_id(payload['user'])
+                    feedback_id = await slack_bot.post_feedback(
+                            langsmith_client,
+                            user_name,
+                            ai.run_ids[payload['item']['ts']],
+                            score)
+                    logger.info("Posted %s score for %s, with id %s",
+                                score,
+                                ai.run_ids[payload['item']['ts']],
+                                feedback_id)
                 else:
                     logger.info("Couldn't find %s in run_id map", payload['item']['ts'])
         else:
