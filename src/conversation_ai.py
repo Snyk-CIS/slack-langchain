@@ -16,8 +16,11 @@ from langchain.prompts import (
         HumanMessagePromptTemplate,
         MessagesPlaceholder,
 )
-from langchain.callbacks.manager import AsyncCallbackManager
-from langchain.callbacks.manager import CallbackManager
+from langchain.callbacks.manager import (
+        AsyncCallbackManager,
+        CallbackManager,
+        collect_runs
+)
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.language_models import LanguageModelLike
@@ -37,7 +40,7 @@ from slack_sdk import WebClient
 from callback_handler import AsyncStreamingSlackCallbackHandler
 from prompts import (HUMAN_PROMPT_TEMPLATE,
                      REPHRASE_TEMPLATE)
-from chatapp import Chatapp
+from chatapp import Chatapp, Config
 
 def format_docs(docs: List):
     '''
@@ -110,6 +113,7 @@ def create_welcome_message(
         "status_text": profile.get("status_text")})
     return output.content
 
+# pylint: disable=too-many-instance-attributes
 class ConversationAI(Chatapp):
     '''
     Conversation class
@@ -127,8 +131,9 @@ class ConversationAI(Chatapp):
         self.callback_handler = None
         self.slack_client = slack_client
         self.lock = asyncio.Lock()
+        self.run_ids = {}
 
-        super().__init__()
+        super().__init__(Config())
 
         set_debug(self.config.langchain_debug)
 
@@ -215,13 +220,17 @@ class ConversationAI(Chatapp):
 
         print(f"Will use model: {self.openai.openai_model_name}")
         print(f"Will use temperature: {self.temperature}")
+        model_facts = f"You are based on the OpenAI model {self.openai.openai_model_name}. \
+                Your 'creativity temperature' is set to {self.temperature}."
+
 
         prompt = ChatPromptTemplate.from_messages(
             [
                 ChatPromptTemplate.from_messages([
                     ("system", self.system_prompt),
                     ]).partial(
-                   bot_name = self.bot_name
+                   bot_name = self.bot_name,
+                   model_facts = model_facts
                 ),
                 HumanMessagePromptTemplate.from_template(
                     HUMAN_PROMPT_TEMPLATE
@@ -238,7 +247,6 @@ class ConversationAI(Chatapp):
         )
         self.callback_handler = AsyncStreamingSlackCallbackHandler(self.slack_client)
 
-        llm = self.init_model()
         if self.config.enable_rephrase:
             rephrase_llm = self.init_rephrase_llm()
             rephrase_chain = create_rephrase_chain(rephrase_llm)
@@ -292,7 +300,7 @@ class ConversationAI(Chatapp):
         | rephrase_chain
         | context
         | prompt
-        | llm
+        | self.init_model()
         | StrOutputParser()
         )
         return self.agent
@@ -317,7 +325,12 @@ class ConversationAI(Chatapp):
             await self.get_or_create_agent(sender_user_info)
             print("Starting response...")
             await self.callback_handler.start_new_response(channel_id, thread_ts)
-            response = await self.agent.ainvoke({"input": message})
+            with collect_runs() as cb:
+                response = await self.agent.ainvoke({"input": message})
+                run_id = cb.traced_runs[0].id
             self.memory.chat_memory.add_user_message(message)
             self.memory.chat_memory.add_ai_message(response)
+            if run_id:
+                # Store ts to run_id mapping for feedback
+                self.run_ids[self.callback_handler.last_ts] = run_id
             return response

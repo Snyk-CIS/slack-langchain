@@ -28,6 +28,7 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
         self.update_delay = 0.1  # Set the desired delay in seconds
         self.update_throttle = SimpleThrottle(self._update_message_in_slack, self.update_delay)
         self.current_message = ""
+        self.last_ts = None
 
     async def start_new_response(self, channel_id, thread_ts):
         '''
@@ -84,6 +85,8 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
         """Run when LLM ends running."""
         try:
             await self.update_throttle.call_and_wait()
+            # Make the message ts available after the run
+            self.last_ts = self.message_ts
             # Make sure it got the last one:
             await self.start_new_response(self.channel_id, self.thread_ts)
         except Exception as e:

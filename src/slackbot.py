@@ -3,24 +3,23 @@
 '''
 Slackbot
 '''
-import os
 import re
 from typing import List
 import logging
+from slack_sdk.errors import SlackApiError
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
+from langsmith import Client
+from chatapp import Config
 from conversation_ai import ConversationAI, create_welcome_message
 logger = logging.getLogger(__name__)
 
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_APP_TOKEN = os.environ.get('SLACK_APP_TOKEN')
-SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
-
+# pylint: disable=too-many-instance-attributes
 class SlackBot():
     '''
     Slackbot class
     '''
-    def __init__(self, slack_app: AsyncApp):
+    def __init__(self, slack_app: AsyncApp, config):
         self.threads_bot_is_participating_in = {}
         self.app = slack_app
         self.client = self.app.client
@@ -28,6 +27,7 @@ class SlackBot():
         self.user_id_to_info_cache = {}
         self.bot_user_id = None
         self.bot_user_name = None
+        self.config = config
 
     async def start(self):
         '''
@@ -40,7 +40,7 @@ class SlackBot():
         logger.info("Bot user id: %s", self.bot_user_id)
         logger.info("Bot user name: %s", self.bot_user_name)
 
-        await AsyncSocketModeHandler(app, SLACK_APP_TOKEN).start_async()
+        await AsyncSocketModeHandler(app, self.config.slack.slack_app_token).start_async()
 
     async def get_user_info_for_user_id(self, user_id):
         '''
@@ -169,11 +169,7 @@ class SlackBot():
         Respond to message
         '''
         try:
-            conversation_ai: ConversationAI = self.threads_bot_is_participating_in.get(
-                    thread_ts,
-                    None)
-            if conversation_ai is None:
-                raise Exception("No AI found for thread_ts")
+            conversation_ai = self.get_ai_for_thread(thread_ts)
             text = await self.translate_mentions_to_names(text)
             sender_user_info = await self.get_user_info_for_user_id(user_id)
             response = await conversation_ai.respond(sender_user_info,
@@ -308,7 +304,7 @@ class SlackBot():
         '''
         New joiner
         '''
-        if os.environ.get("WELCOME_MESSAGE"):
+        if self.config.welcome_message:
             # Get user ID and channel ID from event data
             user_id = event["user"]
             channel_id = event["channel"]
@@ -329,9 +325,68 @@ class SlackBot():
                 except Exception as e:
                     logger.exception("Error sending welcome message: %s", e)
 
-app = AsyncApp(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
+    async def get_message(self, channel_id, message_ts):
+        '''
+        Get a message
+        '''
+        try:
+            message = await self.client.conversations_replies(
+                    channel=channel_id,
+                    ts=message_ts,
+                )
+        except SlackApiError as e:
+            print(f"Error updating message: {e}")
+        return message
+
+    async def post_feedback(self,
+                      ls_client,
+                      slack_user,
+                      run_id,
+                      score):
+        '''
+        Post feedback score to langsmith
+        '''
+        try:
+            feedback = ls_client.create_feedback(
+                    run_id,
+                    score =score,
+                    comment = slack_user,
+                    key ='Slack'
+                    )
+        except Exception as e:
+            logger.exception("Error sending feedback: %s", e)
+        return feedback.id
+
+
+    def get_ai_for_thread(self, thread_ts):
+        '''
+        Get the AI for a thread
+        '''
+        conversation_ai: ConversationAI = self.threads_bot_is_participating_in.get(
+                thread_ts,
+                None)
+        if conversation_ai is None:
+            raise Exception("No AI found for thread_ts")
+        return conversation_ai
+
+    def get_feedback_score(self, emoji):
+        '''
+        Feedback emoji
+        '''
+        score_mappings = {
+                "+1": 1,
+                "-1": -1
+        }
+        score = score_mappings.get(emoji,False)
+        print(f"Score is {score}")
+        return score
+
+default_config = Config()
+app = AsyncApp(token=default_config.slack.slack_bot_token,
+               signing_secret=default_config.slack.slack_signing_secret)
 client = app.client
-slack_bot = SlackBot(app)
+slack_bot = SlackBot(app, default_config)
+langsmith_client = Client()
 
 @app.event("message")
 async def on_message(payload, say):
@@ -355,7 +410,35 @@ async def on_reaction_added(payload):
     '''
     On reaction added
     '''
-    logger.info("Ignoring reaction_added %s", payload)
+    logger.info("reaction_added %s", payload)
+    if slack_bot.config.slack.enable_feedback:
+        if payload['item_user'] == slack_bot.bot_user_id and (
+                score := slack_bot.get_feedback_score(payload['reaction'])):
+            # Get the message
+            message = await slack_bot.get_message(
+                    payload['item']['channel'], payload['item']['ts'])
+            if message:
+                # Get the ai for the thread
+                ai = slack_bot.get_ai_for_thread(message['messages'][0]['thread_ts'])
+                if ai:
+                    # Lookup the run id
+                    if payload['item']['ts'] in ai.run_ids:
+                        logger.info("Got run id %s in run_ids map",
+                                    ai.run_ids[payload['item']['ts']])
+                        user_name = await slack_bot.get_username_for_user_id(payload['user'])
+                        feedback_id = await slack_bot.post_feedback(
+                                langsmith_client,
+                                user_name,
+                                ai.run_ids[payload['item']['ts']],
+                                score)
+                        logger.info("Posted %s score for %s, with id %s",
+                                    score,
+                                    ai.run_ids[payload['item']['ts']],
+                                    feedback_id)
+                    else:
+                        logger.info("Couldn't find %s in run_id map", payload['item']['ts'])
+            else:
+                logger.info("Could not get message from reaction event")
 
 @app.event('reaction_removed')
 async def on_reaction_removed(payload):
