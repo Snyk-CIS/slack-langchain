@@ -304,20 +304,23 @@ class SlackBot():
         '''
         New joiner
         '''
-        if self.config.welcome_message:
+        if self.config.welcome_message == 'true':
             # Get user ID and channel ID from event data
             user_id = event["user"]
             channel_id = event["channel"]
 
             user_info = await self.get_user_info_for_user_id(user_id)
-            user_name = await self.get_username_for_user_id(user_id)
-            profile = user_info.get("profile", {})
+            user_dict = {
+                "user_id": user_id,
+                "user_name": await self.get_username_for_user_id(user_id),
+                "user_profile": user_info.get("profile", {})
+            }
+
             welcome_message = create_welcome_message(
+                    self.config.welcome_purpose,
                     self.bot_user_name,
                     self.bot_user_id,
-                    user_name,
-                    user_id,
-                    profile)
+                    user_dict)
             if welcome_message:
                 try:
                     # Send a welcome message to the user
@@ -411,7 +414,7 @@ async def on_reaction_added(payload):
     On reaction added
     '''
     logger.info("reaction_added %s", payload)
-    if slack_bot.config.slack.enable_feedback:
+    if slack_bot.config.slack.enable_feedback == 'true':
         if payload['item_user'] == slack_bot.bot_user_id and (
                 score := slack_bot.get_feedback_score(payload['reaction'])):
             # Get the message

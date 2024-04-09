@@ -1,9 +1,8 @@
 '''
 AI Class
 '''
-import os
 import asyncio
-from typing import List
+from typing import Sequence
 from operator import itemgetter
 from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
@@ -32,6 +31,7 @@ from langchain_core.runnables import (
     RunnablePassthrough,
 )
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.documents import Document
 from langchain_community.llms import Ollama
 from langchain_community.vectorstores import Chroma
 from langchain_community.vectorstores.pgvector import PGVector
@@ -39,20 +39,31 @@ from langchain_community.embeddings.gpt4all import GPT4AllEmbeddings
 from slack_sdk import WebClient
 from callback_handler import AsyncStreamingSlackCallbackHandler
 from prompts import (HUMAN_PROMPT_TEMPLATE,
-                     REPHRASE_TEMPLATE)
+                     REPHRASE_PROMPT_TEMPLATE,
+                     WELCOME_PROMPT_TEMPLATE,
+                     CITATION_PROMPT_TEMPLATE,
+                     START_SYSTEM_PROMPT_TEMPLATE,
+                     END_SYSTEM_PROMPT_TEMPLATE)
 from chatapp import Chatapp, Config
 
-def format_docs(docs: List):
+def format_docs(docs: Sequence[Document]) -> str:
     '''
-    Format the docs
+    Format docs
     '''
-    return "\n\n".join([d.page_content for d in docs])
+    formatted_docs = []
+    for doc in docs:
+        if 'source_url' in doc.metadata:
+            doc_string = f"<doc source_url='{doc.metadata['source_url']}'>{doc.page_content}</doc>"
+        else:
+            doc_string = f"<doc>{doc.page_content}</doc>"
+        formatted_docs.append(doc_string)
+    return "\n".join(formatted_docs)
 
 def create_rephrase_chain(llm) -> Runnable:
     '''
     Create the rephrase chain
     '''
-    rephrase_question_prompt = PromptTemplate.from_template(REPHRASE_TEMPLATE)
+    rephrase_question_prompt = PromptTemplate.from_template(REPHRASE_PROMPT_TEMPLATE)
     rephrase_question_chain = (
         rephrase_question_prompt | llm | StrOutputParser()
     ).with_config(
@@ -85,11 +96,10 @@ def create_retriever_chain(
             | retriever).with_config(run_name="RetrievalChain")
 
 def create_welcome_message(
+        welcome_purpose,
         bot_user_name,
         bot_user_id,
-        user_name,
-        user_id,
-        profile):
+        user_dict):
     '''
     Generate a welcome message
     '''
@@ -100,17 +110,17 @@ def create_welcome_message(
             max_retries=5,
             verbose=True
             )
-    prompt = PromptTemplate.from_template(os.environ.get("WELCOME_PROMPT"))
-    print(prompt)
+    prompt = PromptTemplate.from_template(WELCOME_PROMPT_TEMPLATE)
     chain = prompt | llm_gpt3_turbo
     output = chain.invoke({
+        "welcome_purpose": welcome_purpose,
         "bot_name": bot_user_name,
         "bot_user_id": bot_user_id,
-        "user_name": user_name,
-        "user_id": user_id,
-        "user_title": profile.get("title"),
-        "status_emoji": profile.get("status_emoji"),
-        "status_text": profile.get("status_text")})
+        "user_name": user_dict['user_name'],
+        "user_id": user_dict['user_id'],
+        "user_title": user_dict['profile'].get("title"),
+        "status_emoji": user_dict['profile'].get("status_emoji"),
+        "status_text": user_dict['profile'].get("status_text")})
     return output.content
 
 # pylint: disable=too-many-instance-attributes
@@ -135,7 +145,8 @@ class ConversationAI(Chatapp):
 
         super().__init__(Config())
 
-        set_debug(self.config.langchain_debug)
+        if self.config.langchain_debug == 'true':
+            set_debug(True)
 
     def init_model(self) -> LanguageModelLike:
         '''
@@ -207,8 +218,20 @@ class ConversationAI(Chatapp):
                     embedding_function = self.init_embeddings(),
             )
         return vectorstore.as_retriever(
-                  search_kwargs = {'k': 30}
+                  search_kwargs = {'k': 10}
               )
+
+    def construct_prompt(self):
+        '''
+        Construct the prompt
+        '''
+
+        if self.config.enable_sources == 'true':
+            start_system_prompt = START_SYSTEM_PROMPT_TEMPLATE + CITATION_PROMPT_TEMPLATE
+        else:
+            start_system_prompt = START_SYSTEM_PROMPT_TEMPLATE
+        system_prompt = start_system_prompt + END_SYSTEM_PROMPT_TEMPLATE
+        return system_prompt
 
     async def create_agent(self, sender_user_info):
         '''
@@ -227,10 +250,12 @@ class ConversationAI(Chatapp):
         prompt = ChatPromptTemplate.from_messages(
             [
                 ChatPromptTemplate.from_messages([
-                    ("system", self.system_prompt),
+                    ("system", self.construct_prompt())
                     ]).partial(
+                   bot_purpose = self.bot_purpose,
+                   bot_support = self.bot_support,
                    bot_name = self.bot_name,
-                   model_facts = model_facts
+                   model_facts = model_facts,
                 ),
                 HumanMessagePromptTemplate.from_template(
                     HUMAN_PROMPT_TEMPLATE
@@ -247,7 +272,7 @@ class ConversationAI(Chatapp):
         )
         self.callback_handler = AsyncStreamingSlackCallbackHandler(self.slack_client)
 
-        if self.config.enable_rephrase:
+        if self.config.enable_rephrase == 'true':
             rephrase_llm = self.init_rephrase_llm()
             rephrase_chain = create_rephrase_chain(rephrase_llm)
         else:
