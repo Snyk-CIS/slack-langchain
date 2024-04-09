@@ -22,9 +22,11 @@ class Config():
     '''
     def __init__(self):
         self.slack = self.SlackConfig()
-        self.enable_rephrase = True
-        self.langchain_debug = False
-        self.welcome_message = False
+        self.enable_rephrase = 'true'
+        self.langchain_debug = 'false'
+        self.welcome_message = 'false'
+        self.welcome_purpose = None
+        self.enable_sources = 'true'
 
         self._set_defaults()
         self._configure_welcome()
@@ -33,8 +35,8 @@ class Config():
         '''
         Configure welome message
         '''
-        if self.welcome_message:
-            iterset_envvars(self, ['WELCOME_PROMPT'])
+        if self.welcome_message == 'true':
+            iterset_envvars(self, ['WELCOME_PURPOSE'])
 
     def _set_defaults(self):
         '''
@@ -44,6 +46,7 @@ class Config():
             'ENABLE_REPHRASE',
             'LANGCHAIN_DEBUG',
             'WELCOME_MESSAGE',
+            'ENABLE_SOURCES'
         ]
         iterset_envvars(self,
                         optional_config,
@@ -54,11 +57,11 @@ class Config():
         Slack config
         '''
         def __init__(self):
-            self.slack_debug = False
+            self.slack_debug = 'false'
             self.slack_bot_token = None
             self.slack_app_token = None
             self.slack_signing_secret = None
-            self.enable_feedback = True
+            self.enable_feedback = 'true'
 
             self._set_defaults()
 
@@ -91,7 +94,8 @@ class Chatapp():
         self.config = config
         self.model_type = None
         self.temperature = None
-        self.system_prompt = None
+        self.bot_purpose = None
+        self.bot_support = None
         self._check_envvars()
 
         if self.vector.embed_type == 'openai' and not self.model_type == 'openai':
@@ -107,7 +111,8 @@ class Chatapp():
         base_config = [
                 'MODEL_TYPE',
                 'TEMPERATURE',
-                'SYSTEM_PROMPT']
+                'BOT_PURPOSE',
+                'BOT_SUPPORT']
         iterset_envvars(self, base_config)
 
     class OpenAI():

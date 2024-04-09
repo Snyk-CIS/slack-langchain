@@ -2,6 +2,7 @@
 '''
 Callback handler for Slack
 '''
+import re
 import logging
 from typing import Any, Dict, List, Union
 from langchain.callbacks.base import AsyncCallbackHandler
@@ -12,6 +13,23 @@ from slack_sdk.errors import SlackApiError
 from simple_throttle import SimpleThrottle
 
 logger = logging.getLogger(__name__)
+
+def markdown_to_slack(text):
+    '''
+    Markdown to Slack Markdown
+    '''
+    regex_replace = (
+        (re.compile('^- ', flags=re.M), '• '),
+        (re.compile('^  - ', flags=re.M), '  ◦ '),
+        (re.compile('^    - ', flags=re.M), '    ⬩ '),
+        (re.compile('^      - ', flags=re.M), '    ◽ '),
+        (re.compile('^#+ (.+)$', flags=re.M), r'*\1*'),
+        (re.compile(r'\*\*'), '*'),
+    )
+
+    for regex, replacement in regex_replace:
+        text = regex.sub(replacement, text)
+    return text
 
 # pylint: disable=abstract-method,too-many-ancestors
 class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
@@ -25,8 +43,7 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
         self.channel_id = None
         self.thread_ts = None
         self.message_ts = None
-        self.update_delay = 0.1  # Set the desired delay in seconds
-        self.update_throttle = SimpleThrottle(self._update_message_in_slack, self.update_delay)
+        self.update_throttle = SimpleThrottle(self._update_message_in_slack, 0.1)
         self.current_message = ""
         self.last_ts = None
 
@@ -45,7 +62,8 @@ class AsyncStreamingSlackCallbackHandler(AsyncCallbackHandler):
                 await self.client.chat_update(
                     channel=self.channel_id,
                     ts=self.message_ts,
-                    text=self.current_message
+                    # gpt-3.5-turbo doesn't do Slack markdown properly
+                    text=markdown_to_slack(self.current_message)
                 )
             except SlackApiError as e:
                 print(f"Error updating message: {e}")
